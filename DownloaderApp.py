@@ -1,12 +1,70 @@
 import json
 import os
 import re
+import secrets
 import subprocess
 
 import requests
 #for issue contact me ranjanpanpura@gmail.com,https://www.instagram.com/devilfordevs/?hl=en,
 
+
+class RandomStringGenerator:
+    ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+
+    @staticmethod
+    def generate_content_playback_nonce() -> str:
+        return RandomStringGenerator._generate(RandomStringGenerator.ALPHABET, 16)
+
+    @staticmethod
+    def generate_t_parameter() -> str:
+        return RandomStringGenerator._generate(RandomStringGenerator.ALPHABET, 12)
+
+    @staticmethod
+    def _generate(alphabet: str, length: int) -> str:
+        return ''.join(secrets.choice(alphabet) for _ in range(length))
+
 class DownloaderApp:
+    def get_visitor_id(self) -> str:
+        url = "https://youtubei.googleapis.com/youtubei/v1/visitor_id?prettyPrint=false"
+
+        # JSON request body
+        json_body = {
+            "context": {
+                "request": {
+                    "internalExperimentFlags": []
+                },
+                "client": {
+                    "androidSdkVersion": 35,
+                    "utcOffsetMinutes": 0,
+                    "osVersion": "15",
+                    "hl": "en-GB",
+                    "clientName": "ANDROID",
+                    "gl": "GB",
+                    "clientScreen": "WATCH",
+                    "clientVersion": "19.28.35",
+                    "osName": "Android",
+                    "platform": "MOBILE"
+                },
+                "user": {
+                    "lockedSafetyMode": False
+                }
+            }
+        }
+
+        headers = {
+            "User-Agent": "com.google.android.youtube/19.28.35 (Linux; U; Android 15; GB) gzip",
+            "X-Goog-Api-Format-Version": "2",
+            "Content-Type": "application/json",
+            "Accept-Language": "en-GB, en;q=0.9"
+        }
+
+        response = requests.post(url, headers=headers, data=json.dumps(json_body))
+
+        if response.status_code == 200:
+            response_json = response.json()
+            return response_json["responseContext"]["visitorData"]
+        else:
+            raise Exception(f"Failed to get visitor ID: {response.status_code} - {response.text}")
     def make_youtube_request(self,video_id):
         self.downloaded_bytes=0
         url = "https://www.youtube.com/youtubei/v1/player"
@@ -159,11 +217,66 @@ class DownloaderApp:
             return match_result.group(1)
         return None
 
+    def android_player_response(self,cpn: str, visitor_data: str, video_id: str, t: str) -> requests.Response:
+        url = f"https://youtubei.googleapis.com/youtubei/v1/reel/reel_item_watch?prettyPrint=false&t={t}&id={video_id}&fields=playerResponse"
 
+        # JSON request body
+        json_body = {
+            "cpn": cpn,
+            "contentCheckOk": True,
+            "context": {
+                "request": {
+                    "internalExperimentFlags": []
+                },
+                "client": {
+                    "androidSdkVersion": 35,
+                    "utcOffsetMinutes": 0,
+                    "osVersion": "15",
+                    "hl": "en-GB",
+                    "clientName": "ANDROID",
+                    "gl": "GB",
+                    "clientScreen": "WATCH",
+                    "clientVersion": "19.28.35",
+                    "osName": "Android",
+                    "platform": "MOBILE",
+                    "visitorData": visitor_data
+                },
+                "user": {
+                    "lockedSafetyMode": False
+                }
+            },
+            "racyCheckOk": True,
+            "videoId": video_id,
+            "playerRequest": {
+                "videoId": video_id
+            },
+            "disablePlayerResponse": False
+        }
+
+        # Request headers
+        headers = {
+            "User-Agent": "com.google.android.youtube/19.28.35 (Linux; U; Android 15; GB) gzip",
+            "X-Goog-Api-Format-Version": "2",
+            "Content-Type": "application/json",
+            "Accept-Language": "en-GB, en;q=0.9"
+        }
+
+        # Send the request
+        response = requests.post(url, headers=headers, data=json.dumps(json_body))
+
+        return response
     def startFuction(self):
         urlInput = input("\nEnter Youtube Url >>>")
         videoId = self.extract_video_id(urlInput)
-        responsYt = self.make_youtube_request(videoId)
+        #visitor id or data expected by youtube in every request for streamingData
+        visitor_data = self.get_visitor_id()
+        #cpn or nonce string will return in each format url
+        cpn = RandomStringGenerator.generate_content_playback_nonce()
+        #t parameter used for what i dont know
+        tp = RandomStringGenerator.generate_t_parameter()
+        response = self.android_player_response(cpn, visitor_data, videoId, tp)
+        #here the json returned has extra key(PlayerResponse) as compared to ios client
+        responsYt = response.json()["playerResponse"]
         title = self.txt2filename(responsYt["videoDetails"]["title"])
         print(title)
         fmts = responsYt["streamingData"]["adaptiveFormats"]
@@ -172,7 +285,7 @@ class DownloaderApp:
                 item = str(fmt["itag"]) + "   " + self.convert_bytes(fmt["bitrate"]) + "/s   " + self.convert_bytes(
                     int(fmt["contentLength"]))
                 print(item)
-            if "avc1" in fmt["mimeType"]:
+            if "video" in fmt["mimeType"]:
                 item = str(fmt["itag"]) + "   " + fmt["qualityLabel"] + "    " + self.convert_bytes(
                     int(fmt["contentLength"]))
                 print(item)
